@@ -27,9 +27,12 @@ class SimulatedTools:
     def wait_ms(self, duration):
         time.sleep(duration / 1000)
 
-    def set_servo_angle(self, angle):
+    def move_servo(self, angle):
         self._servo_angle = int(angle)
         print("      [SERVO {}°]".format(self._servo_angle))
+
+    def set_servo_angle(self, angle):
+        self.move_servo(angle)
 
     def read_servo_angle(self):
         return self._servo_angle

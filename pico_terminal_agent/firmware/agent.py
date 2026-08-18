@@ -1,4 +1,4 @@
-"""Agente orientado a objetivos para conversa e controle do LED."""
+"""Agente orientado a objetivos para conversa, LED e servo."""
 
 from text_processing import normalize
 
@@ -51,6 +51,44 @@ class ConversationAgent:
                 pass
         return 3
 
+    def _extract_angle(self, text):
+        """Extrai um ângulo numérico; None significa que o agente deve escolher."""
+        for token in normalize(text).split():
+            try:
+                return int(token)
+            except ValueError:
+                pass
+        return None
+
+    def _has_led_target(self, text):
+        """Ações de luz exigem que o usuário nomeie explicitamente o alvo."""
+        words = normalize(text).split()
+        return "led" in words or "luz" in words
+
+    def _missing_led_target_answer(self):
+        return (
+            "Indique o alvo usando 'LED' ou 'luz'. Exemplo: 'acender LED' "
+            "ou 'apagar luz'."
+        )
+
+    def _choose_servo_angle(self):
+        """Escolhe uma posição segura e distante da posição atual."""
+        self._sync_beliefs()
+        current = self.beliefs["servo_angle"]
+        if self.beliefs["turn"] % 2 == 0:
+            candidates = (150, 30, 90)
+        else:
+            candidates = (30, 150, 90)
+
+        selected = candidates[0]
+        best_distance = abs(selected - current)
+        for candidate in candidates[1:]:
+            distance = abs(candidate - current)
+            if distance > best_distance:
+                selected = candidate
+                best_distance = distance
+        return selected
+
     def _plan(self, goal):
         """Gera ações usando o estado atual, sem depender da frase original."""
         self._sync_beliefs()
@@ -100,6 +138,14 @@ class ConversationAgent:
             actions.append(("release_servo", True))
             return actions
 
+        if goal["kind"] == "servo_position":
+            target = int(goal["target"])
+            if self.beliefs["servo_angle"] != target:
+                actions.append(("servo_angle", target))
+                actions.append(("wait", 500))
+            actions.append(("verify_servo", target))
+            return actions
+
         return actions
 
     def _execute_plan(self, actions):
@@ -114,7 +160,7 @@ class ConversationAgent:
                 if self.beliefs["led_on"] != bool(value):
                     return False
             elif action == "servo_angle":
-                self.tools.set_servo_angle(value)
+                self.tools.move_servo(value)
                 self.beliefs["servo_angle"] = int(value)
             elif action == "verify_servo":
                 self._sync_beliefs()
@@ -130,7 +176,7 @@ class ConversationAgent:
         success = self._execute_plan(plan)
 
         # Para metas de estado, uma falha causa uma nova observação e tentativa.
-        if not success and goal["kind"] == "led_state":
+        if not success and goal["kind"] in ("led_state", "servo_position"):
             success = self._execute_plan(self._plan(goal))
 
         self.current_goal = None
@@ -152,14 +198,16 @@ class ConversationAgent:
             return (
                 "Consigo conversar dentro do meu domínio, lembrar mensagens, "
                 "consultar, acender, apagar e piscar o LED, além de acenar "
-                "com um servo no GP15.",
+                "ou escolher uma posição para o servo no GP15.",
                 False,
             )
 
         if intent == "ajuda":
             return (
-                "Tente: 'quem é você?', 'acenda o LED', 'pisque duas vezes', "
-                "'acene para mim', 'o LED está apagado?' ou "
+                "Tente: 'quem é você?', 'acender LED', 'lumos luz', "
+                "'pisque o LED duas vezes', "
+                "'acene para mim', 'posicione o servo em 120 graus', "
+                "'o LED está apagado?' ou "
                 "'o que eu disse antes?'.",
                 False,
             )
@@ -193,6 +241,8 @@ class ConversationAgent:
             return "Não, o LED está aceso.", False
 
         if intent == "ligar_led":
+            if not self._has_led_target(text):
+                return self._missing_led_target_answer(), False
             already_on = bool(self.tools.read_led())
             success, action_count = self._achieve({
                 "kind": "led_state",
@@ -205,6 +255,8 @@ class ConversationAgent:
             return "Sim. Planejei e executei " + str(action_count) + " ações; LED aceso.", False
 
         if intent == "desligar_led":
+            if not self._has_led_target(text):
+                return self._missing_led_target_answer(), False
             already_off = not bool(self.tools.read_led())
             success, action_count = self._achieve({
                 "kind": "led_state",
@@ -217,6 +269,8 @@ class ConversationAgent:
             return "Sim. Planejei e executei " + str(action_count) + " ações; LED apagado.", False
 
         if intent == "piscar_led":
+            if not self._has_led_target(text):
+                return self._missing_led_target_answer(), False
             count = self._extract_count(text)
             self._sync_beliefs()
             final_state = self.beliefs["led_on"]
@@ -247,9 +301,37 @@ class ConversationAgent:
                 False,
             )
 
+        if intent == "posicionar_servo":
+            requested_angle = self._extract_angle(text)
+            agent_selected = requested_angle is None
+            target = self._choose_servo_angle() if agent_selected else requested_angle
+
+            if target < 0 or target > 180:
+                return "Escolha uma posição entre 0 e 180 graus.", False
+
+            success, action_count = self._achieve({
+                "kind": "servo_position",
+                "target": target,
+            })
+            if not success:
+                return "Não consegui confirmar a posição do servo.", False
+
+            if agent_selected:
+                return (
+                    "Você não informou o ângulo; escolhi " + str(target)
+                    + " graus e executei " + str(action_count)
+                    + " ações; posição mantida.",
+                    False,
+                )
+            return (
+                "Servo posicionado em " + str(target) + " graus após "
+                + str(action_count) + " ações; posição mantida.",
+                False,
+            )
+
         return (
             "Não compreendi com segurança. Meu domínio é conversa básica, LED "
-            "e acenos com o servo; peça ajuda para ver exemplos.",
+            "acenos e posicionamento do servo; peça ajuda para exemplos.",
             False,
         )
 

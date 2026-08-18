@@ -29,10 +29,13 @@ class FakeTools:
     def wait_ms(self, duration):
         self.waits.append(duration)
 
-    def set_servo_angle(self, angle):
+    def move_servo(self, angle):
         self.servo_angle = int(angle)
         self.servo_released = False
         self.servo_commands.append(self.servo_angle)
+
+    def set_servo_angle(self, angle):
+        self.move_servo(angle)
 
     def read_servo_angle(self):
         return self.servo_angle
@@ -58,7 +61,7 @@ class AgentTests(unittest.TestCase):
         )
 
     def test_agent_plans_led_goal_and_answers_yes_no(self):
-        result = self.ask("Por favor, ilumine isso")
+        result = self.ask("Por favor, acenda o LED")
         self.assertEqual(result["intent"], "ligar_led")
         self.assertTrue(self.tools.led_on)
 
@@ -76,7 +79,7 @@ class AgentTests(unittest.TestCase):
 
     def test_blink_restores_previous_state(self):
         self.tools.led_on = True
-        result = self.ask("Pisca duas vezes")
+        result = self.ask("Pisca o LED duas vezes")
         self.assertEqual(result["intent"], "piscar_led")
         self.assertTrue(self.tools.led_on)
         self.assertIn("2 piscadas", result["text"])
@@ -95,10 +98,69 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(self.tools.servo_released)
         self.assertIn("2 movimentos", result["text"])
 
+    def test_agent_positions_servo_at_explicit_angle(self):
+        result = self.ask("Posicione o servo em 180 graus")
+        self.assertEqual(result["intent"], "posicionar_servo")
+        self.assertEqual(self.tools.servo_angle, 180)
+        self.assertEqual(self.tools.servo_commands, [180])
+        self.assertFalse(self.tools.servo_released)
+        self.assertIn("180 graus", result["text"])
+
+    def test_agent_selects_position_when_angle_is_omitted(self):
+        result = self.ask("Escolha uma posição para o servo")
+        self.assertEqual(result["intent"], "posicionar_servo")
+        self.assertIn(self.tools.servo_angle, (30, 90, 150))
+        self.assertNotEqual(self.tools.servo_angle, 90)
+        self.assertFalse(self.tools.servo_released)
+        self.assertIn("escolhi", result["text"])
+
+    def test_agent_rejects_servo_angle_outside_range(self):
+        result = self.ask("Posicione o servo em 250 graus")
+        self.assertEqual(result["intent"], "posicionar_servo")
+        self.assertEqual(self.tools.servo_commands, [])
+        self.assertIn("entre 0 e 180", result["text"])
+
     def test_unknown_request_is_refused(self):
         result = self.ask("Faça café para mim")
         self.assertEqual(result["intent"], "desconhecido")
         self.assertFalse(self.tools.led_on)
+
+    def test_led_actions_require_an_explicit_target(self):
+        cases = (
+            ("ligar", "ligar_led", False),
+            ("acender", "ligar_led", False),
+            ("lumos", "ligar_led", False),
+            ("desligar", "desligar_led", True),
+            ("apagar", "desligar_led", True),
+            ("nox", "desligar_led", True),
+            ("piscar", "piscar_led", False),
+        )
+        for phrase, intent, initial_state in cases:
+            with self.subTest(phrase=phrase):
+                self.tools.led_on = initial_state
+                self.tools.waits = []
+                result = self.ask(phrase)
+                self.assertEqual(self.tools.led_on, initial_state)
+                self.assertEqual(self.tools.waits, [])
+                self.assertEqual(result["intent"], intent)
+                self.assertIn("LED", result["text"])
+                self.assertIn("luz", result["text"])
+
+    def test_led_on_aliases_with_target(self):
+        for phrase in ("ligar LED", "acender luz", "lumos LED"):
+            with self.subTest(phrase=phrase):
+                self.tools.led_on = False
+                result = self.ask(phrase)
+                self.assertEqual(result["intent"], "ligar_led")
+                self.assertTrue(self.tools.led_on)
+
+    def test_led_off_aliases_with_target(self):
+        for phrase in ("desligar LED", "apagar luz", "nox LED"):
+            with self.subTest(phrase=phrase):
+                self.tools.led_on = True
+                result = self.ask(phrase)
+                self.assertEqual(result["intent"], "desligar_led")
+                self.assertFalse(self.tools.led_on)
 
     def test_classifier_generalizes_to_unseen_phrases(self):
         samples = (
@@ -108,8 +170,9 @@ class AgentTests(unittest.TestCase):
             ("Por gentileza, acenda a luz", "ligar_led"),
             ("A luz segue acesa?", "consulta_aceso"),
             ("Me conte a situação do LED", "estado_led"),
-            ("Dê um sinal piscando", "piscar_led"),
+            ("Dê um sinal de luz piscando", "piscar_led"),
             ("Pode cumprimentar usando o braço?", "acenar_servo"),
+            ("Ajuste a posição do servo para 75 graus", "posicionar_servo"),
             ("Recorda minha última fala?", "memoria"),
             ("Obrigado pela ajuda", "agradecimento"),
             ("Até a próxima", "despedida"),

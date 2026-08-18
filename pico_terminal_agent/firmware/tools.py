@@ -32,10 +32,14 @@ class PicoTools:
     def wait_ms(self, duration):
         time.sleep_ms(duration)
 
-    def set_servo_angle(self, angle):
+    def move_servo(self, angle):
         angle = max(0, min(180, int(angle)))
         self._get_servo().write(angle)
         self._servo_angle = angle
+
+    def set_servo_angle(self, angle):
+        """Compatibilidade com a primeira versão da ferramenta."""
+        self.move_servo(angle)
 
     def read_servo_angle(self):
         return self._servo_angle

@@ -36,7 +36,7 @@ Pico(simulada)> Sim. Planejei e executei 3 ações; LED aceso.
 Você> a luz está acesa?
 Pico(simulada)> Sim, o LED está aceso.
 
-Você> pisque duas vezes
+Você> pisque o LED duas vezes
       [LED APAGADO]
       [LED ACESO]
       [LED APAGADO]
@@ -54,6 +54,14 @@ Você> acene duas vezes
       [SERVO 90°]
       [SERVO LIVRE]
 Pico(simulada)> Aceno concluído: 2 movimentos, 14 ações e servo centralizado.
+
+Você> posicione o servo em 180 graus
+      [SERVO 180°]
+Pico(simulada)> Servo posicionado em 180 graus após 3 ações; posição mantida.
+
+Você> posicionar servo
+      [SERVO 30°]
+Pico(simulada)> Você não informou o ângulo; escolhi 30 graus e executei 3 ações.
 ```
 
 ## Ligação do servo
@@ -74,6 +82,17 @@ o GND da fonte, do servo e da Pico em comum. A Pico pode continuar alimentada
 pelo USB. O gesto usa uma faixa conservadora de 60° a 120°, retorna a 90° e
 interrompe os pulsos ao terminar. Esse código não serve para servo de rotação
 contínua.
+
+O objetivo `posicionar_servo` aceita valores explícitos entre 0° e 180°. Quando
+o ângulo é omitido, o agente observa a última posição comandada e escolhe entre
+30°, 90° e 150°, priorizando uma posição distante da atual. A ferramenta pública
+é `move_servo(angle)`; o driver converte o ângulo para pulsos conservadores entre
+1.000 e 2.000 microssegundos.
+
+No posicionamento direto, o PWM permanece ativo para sustentar o ângulo. Não
+deixe o servo forçando um obstáculo mecânico: isso aumenta corrente e aquecimento.
+O método `release_servo()` pode ser usado para relaxá-lo quando sustentação não
+for necessária. No gesto de aceno, essa liberação acontece automaticamente.
 
 ## Instalação na Pico
 
@@ -98,16 +117,27 @@ Somente um programa pode manter a porta aberta por vez.
 
 ## Frases que o modelo reconhece
 
-O modelo possui 15 intenções, incluindo:
+O modelo possui 16 intenções, incluindo:
 
 - saudação, identidade, capacidades, ajuda e agradecimento;
 - despedida;
 - acender, apagar e piscar o LED;
 - acenar uma quantidade configurável de vezes com o servo;
+- posicionar o servo num ângulo explícito ou escolhido pelo agente;
 - consultar o estado geral do LED;
 - responder se o LED está aceso ou apagado;
 - recuperar a última mensagem da memória;
 - recusar pedidos fora do domínio.
+
+Para alterar o LED, a frase precisa conter uma ação e o alvo `LED` ou `luz`:
+
+- ligar: `ligar LED`, `acender luz`, `lumos LED`;
+- desligar: `desligar LED`, `apagar luz`, `nox LED`;
+- piscar: `piscar LED`, `pisque a luz duas vezes`.
+
+Uma ação isolada, como `ligar`, `apagar` ou `lumos`, não altera a saída. O
+agente pede que você indique se está falando do LED ou da luz. Isso evita que
+uma palavra ambígua acione o hardware por engano.
 
 Experimente variações naturais. O classificador não procura uma palavra com uma
 cadeia de `if`: ele pontua unigramas e bigramas usando pesos aprendidos. Por ser
@@ -127,7 +157,7 @@ O treinamento usa somente a biblioteca padrão do Python. Ele sobrescreve
 `firmware/model_data.py` com os pesos quantizados. Depois, copie novamente esse
 arquivo para a Pico.
 
-O modelo contém cerca de 7,6 KB de pesos `int8`. O arquivo exportado usa
+O modelo contém cerca de 9,4 KB de pesos `int8`. O arquivo exportado usa
 um literal binário para não criar milhares de inteiros temporários no heap do
 MicroPython durante a inicialização.
 
